@@ -6,3 +6,7 @@ desktop.ini
 # Editor settings
 .vscode/
 .idea/
+
+# Local tooling and generated video media
+.claude/
+media/
