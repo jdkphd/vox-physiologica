@@ -320,6 +320,24 @@
   .tw-sw:focus-visible { outline: 2px solid var(--accent-300); outline-offset: 2px; }
   .tw-note { margin: 14px 0 0; font: 400 10.5px/1.5 var(--sans); color: rgba(251,241,220,.38); }
 
+  /* Content drawer shares the frame, adds text fields */
+  body.ct-on .ct { transform: none; }
+  body.ct-on .tw-open { opacity: 0; pointer-events: none; }
+  .ct-open { right: calc(var(--frame) + var(--gutter) + 108px); }
+  .tw-field { display: block; padding: 7px 0; }
+  .tw-field > span {
+    display: block; margin-bottom: 5px;
+    font: 600 9.5px/1 var(--sans); letter-spacing: .16em; text-transform: uppercase; color: rgba(251,241,220,.45);
+  }
+  .tw-field input, .tw-field textarea {
+    width: 100%; box-sizing: border-box; border-radius: 8px;
+    background: rgba(251,241,220,.07); border: 1px solid rgba(251,241,220,.12); color: #fbf1dc;
+    padding: 8px 10px; font: 400 12.5px/1.5 var(--sans); resize: vertical;
+  }
+  .tw-field input:focus, .tw-field textarea:focus { outline: none; border-color: var(--accent-300); }
+  .tw-pair { display: grid; grid-template-columns: 1fr 104px; gap: 8px; align-items: start; }
+  .tw-pair input:last-child { color: rgba(251,241,220,.62); font-size: 11.5px; }
+
 
   /* ---------- Small screens ---------- */
   @media (max-width: 720px) {
@@ -495,7 +513,7 @@
 
 <div class="overlay">
   <header class="brand">
-    <a class="mark" href="#s-1" aria-label="Vox Physiologica, home"><img class="cover-src" alt="" width="34" height="34">Vox Physiologica</a>
+    <a class="mark" href="#s-1" aria-label="Vox Physiologica, home"><img class="cover-src" alt="" width="34" height="34"><span id="brandName">Vox Physiologica</span></a>
     <nav aria-label="Primary">
       <a href="#s-2">Episodes</a>
       <a href="#s-4">About</a>
@@ -516,6 +534,23 @@
   <div class="scroll-hint" id="hint" aria-hidden="true">Scroll<i></i></div>
 </div>
 
+<button class="tw-open ct-open" id="ctOpen" aria-expanded="false" aria-controls="ct">
+  <svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 1.5h8v9H2z"/><path d="M4 4h4M4 6h4M4 8h2.5"/></svg>
+  Content
+</button>
+<aside class="tw ct" id="ct" aria-label="Page content">
+  <div class="tw-head">
+    <h2>Content</h2>
+    <div class="tw-head-actions">
+      <button class="tw-btn" id="ctCopy" title="Copy this copy as JSON">Copy</button>
+      <button class="tw-btn" id="ctReset" title="Back to the written copy">Reset</button>
+      <button class="tw-btn tw-close" id="ctClose" aria-label="Close content">
+        <svg width="10" height="10" viewBox="0 0 10 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M1 1l8 8M9 1L1 9"/></svg>
+      </button>
+    </div>
+  </div>
+  <div class="tw-body" id="ctBody"></div>
+</aside>
 <button class="tw-open" id="twOpen" aria-expanded="false" aria-controls="tw">
   <svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" aria-hidden="true"><path d="M1 3h6M10 3h1M1 9h1M5 9h6"/><circle cx="8.5" cy="3" r="1.5"/><circle cx="3.5" cy="9" r="1.5"/></svg>
   Tweaks
@@ -566,6 +601,31 @@ const SECTIONS = [
     actions: [['Apple Podcasts', '#s-5', true], ['Spotify', '#s-5'], ['RSS', '#s-5']] },
 ];
 const N = SECTIONS.length;
+
+/* Editable copy: defaults come from SECTIONS above, overrides live in the Content drawer */
+const COPY_DEFAULTS = {
+  brand: 'Vox Physiologica',
+  tabTitle: 'Vox Physiologica',
+  nav: ['Episodes', 'About', 'Subscribe'],
+  heroTop: 'Vox',
+  heroBottom: 'Physiologica',
+  sections: SECTIONS.map(s => ({
+    word: s.word,
+    eyebrow: s.eyebrow,
+    title: s.title || '',
+    text: s.text,
+    actions: s.actions.map(a => ({ label: a[0], href: a[1] })),
+  })),
+};
+const copy = JSON.parse(JSON.stringify(COPY_DEFAULTS));
+try {
+  const saved = JSON.parse(localStorage.getItem('vox-copy') || 'null');
+  if (saved) {
+    Object.assign(copy, saved, { sections: copy.sections.map((s, i) => Object.assign(s, (saved.sections || [])[i])) });
+  }
+} catch (e) {}
+const saveCopy = () => { try { localStorage.setItem('vox-copy', JSON.stringify(copy)); } catch (e) {} };
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
 
 /* ------------------------------------------------------------------
@@ -595,15 +655,38 @@ SECTIONS.forEach((s, i) => {
 
   const it = document.createElement('article');
   it.className = 'content-item';
-  const heading = s.hero
-    ? '<h1 class="lockup"><span class="vox">Vox</span><span class="phys">Physiologica</span></h1>'
-    : `<h2>${s.title}</h2><div class="rule"></div>`;
-  it.innerHTML =
-    `<p class="eyebrow">${s.eyebrow}</p>${heading}<p>${s.text}</p>` +
-    `<div class="actions">${s.actions.map(([label, href, solid, icon]) =>
-      `<a class="pill${solid ? ' solid' : ''}" href="${href}">${icon || ''}${label}</a>`).join('')}</div>`;
   contentEl.appendChild(it); items.push(it);
 });
+
+function itemHTML(i) {
+  const s = SECTIONS[i], c = copy.sections[i];
+  const heading = s.hero
+    ? `<h1 class="lockup"><span class="vox">${esc(copy.heroTop)}</span><span class="phys">${esc(copy.heroBottom)}</span></h1>`
+    : `<h2>${esc(c.title)}</h2><div class="rule"></div>`;
+  const actions = c.actions.map((a, j) => {
+    const solid = s.actions[j] && s.actions[j][2], icon = s.actions[j] && s.actions[j][3];
+    return `<a class="pill${solid ? ' solid' : ''}" href="${esc(a.href)}">${icon || ''}${esc(a.label)}</a>`;
+  }).join('');
+  return `<p class="eyebrow">${esc(c.eyebrow)}</p>${heading}<p>${esc(c.text)}</p><div class="actions">${actions}</div>`;
+}
+function renderCopy() {
+  items.forEach((it, i) => { it.innerHTML = itemHTML(i); });
+  $('#brandName').textContent = copy.brand;
+  $('.brand .mark').setAttribute('aria-label', copy.brand + ', home');
+  document.title = copy.tabTitle;
+  $$('.brand nav a').forEach((a, i) => { if (copy.nav[i] !== undefined) a.textContent = copy.nav[i]; });
+  dots.forEach((d, i) => d.setAttribute('aria-label', `Go to section ${i + 1}: ${copy.sections[i].word}`));
+  sectionEls.forEach((sec, i) => sec.setAttribute('aria-label', copy.sections[i].word));
+  setWordLabels();                                        // the column follows the copy
+}
+function setWordLabels() {
+  words.forEach((w, i) => {
+    const label = tw.titleStyle === 'numbers' ? String(i + 1).padStart(2, '0')
+                : tw.titleStyle === 'roman' ? ROMAN[i] : copy.sections[i].word;
+    w.children[0].textContent = label;
+    w.children[1].textContent = label;
+  });
+}
 
 // Cover artwork (embedded as data so the page stays a single file)
 const coverRaw = $('#coverData').textContent.trim();
@@ -746,12 +829,7 @@ function applyTweaks() {
   r.setProperty('--ink-soft', rgba(tw.ink, 0.76));
   r.setProperty('--ink-faint', rgba(tw.ink, 0.42));
 
-  words.forEach((w, i) => {
-    const label = tw.titleStyle === 'numbers' ? String(i + 1).padStart(2, '0')
-                : tw.titleStyle === 'roman' ? ROMAN[i] : SECTIONS[i].word;
-    w.children[0].textContent = label;
-    w.children[1].textContent = label;
-  });
+  setWordLabels();
   window.voxTweaks = { ...tw };   // the WebGL module reads this each frame
   measure();
 }
@@ -808,6 +886,7 @@ function buildTweaks() {
   twBody.appendChild(note);
 }
 function setDrawer(on) {
+  if (on) document.body.classList.remove('ct-on');
   document.body.classList.toggle('tw-on', on);
   twOpenBtn.setAttribute('aria-expanded', String(on));
   twEl.inert = !on;
@@ -828,7 +907,93 @@ $('#twCopy').addEventListener('click', e => {
 });
 buildTweaks();
 twEl.inert = true;
-if (new URLSearchParams(location.search).has('tweaks')) requestAnimationFrame(() => setDrawer(true));
+
+/* ---------- content drawer ---------- */
+const ctEl = $('#ct'), ctBody = $('#ctBody'), ctOpenBtn = $('#ctOpen');
+function field(label, value, onInput, opts) {
+  const o = opts || {};
+  const wrap = document.createElement('label');
+  wrap.className = 'tw-field';
+  const control = o.multiline
+    ? `<textarea rows="${o.rows || 3}">${esc(value)}</textarea>`
+    : `<input type="text" value="${esc(value)}">`;
+  wrap.innerHTML = `<span>${label}</span>` + control;
+  wrap.querySelector(o.multiline ? 'textarea' : 'input').addEventListener('input', e => {
+    onInput(e.target.value);
+    renderCopy(); saveCopy();
+  });
+  return wrap;
+}
+function pairField(label, a, b, onA, onB) {
+  const wrap = document.createElement('div');
+  wrap.className = 'tw-field';
+  wrap.innerHTML = `<span>${label}</span><div class="tw-pair"><input type="text" value="${esc(a)}"><input type="text" value="${esc(b)}" aria-label="Link"></div>`;
+  const [ia, ib] = wrap.querySelectorAll('input');
+  ia.addEventListener('input', e => { onA(e.target.value); renderCopy(); saveCopy(); });
+  ib.addEventListener('input', e => { onB(e.target.value); renderCopy(); saveCopy(); });
+  return wrap;
+}
+function buildCopyDrawer() {
+  ctBody.textContent = '';
+  const site = document.createElement('section');
+  site.className = 'tw-group';
+  site.innerHTML = '<h3>Site</h3>';
+  site.appendChild(field('Wordmark', copy.brand, v => { copy.brand = v; }));
+  site.appendChild(field('Browser tab title', copy.tabTitle, v => { copy.tabTitle = v; }));
+  copy.nav.forEach((label, i) => site.appendChild(field('Nav link ' + (i + 1), label, v => { copy.nav[i] = v; })));
+  ctBody.appendChild(site);
+
+  copy.sections.forEach((c, i) => {
+    const g = document.createElement('section');
+    g.className = 'tw-group';
+    g.innerHTML = `<h3>${i + 1}. ${SECTIONS[i].word}</h3>`;
+    g.appendChild(field('Word in the column', c.word, v => { c.word = v; }));
+    g.appendChild(field('Eyebrow', c.eyebrow, v => { c.eyebrow = v; }));
+    if (SECTIONS[i].hero) {
+      g.appendChild(field('Title, first line', copy.heroTop, v => { copy.heroTop = v; }));
+      g.appendChild(field('Title, second line', copy.heroBottom, v => { copy.heroBottom = v; }));
+    } else {
+      g.appendChild(field('Title', c.title, v => { c.title = v; }, { multiline: true, rows: 2 }));
+    }
+    g.appendChild(field('Paragraph', c.text, v => { c.text = v; }, { multiline: true, rows: 4 }));
+    c.actions.forEach((a, j) => g.appendChild(
+      pairField('Button ' + (j + 1) + ' and link', a.label, a.href, v => { a.label = v; }, v => { a.href = v; })));
+    ctBody.appendChild(g);
+  });
+
+  const note = document.createElement('p');
+  note.className = 'tw-note';
+  note.textContent = 'Edits live in this browser. Copy hands you the JSON — paste it to Claude to write it into the page for everyone.';
+  ctBody.appendChild(note);
+}
+function setCopyDrawer(on) {
+  if (on) setDrawer(false);
+  document.body.classList.toggle('ct-on', on);
+  ctOpenBtn.setAttribute('aria-expanded', String(on));
+  ctEl.inert = !on;
+  if (on) { const f = ctBody.querySelector('input, textarea'); if (f) f.focus(); }
+  else ctOpenBtn.focus();
+}
+ctOpenBtn.addEventListener('click', () => setCopyDrawer(true));
+$('#ctClose').addEventListener('click', () => setCopyDrawer(false));
+addEventListener('keydown', e => {
+  if (e.key === 'Escape' && document.body.classList.contains('ct-on')) setCopyDrawer(false);
+});
+$('#ctReset').addEventListener('click', () => {
+  Object.assign(copy, JSON.parse(JSON.stringify(COPY_DEFAULTS)));
+  buildCopyDrawer(); renderCopy(); saveCopy();
+});
+$('#ctCopy').addEventListener('click', e => {
+  const btn = e.currentTarget, text = JSON.stringify(copy, null, 2);
+  const done = ok => { btn.textContent = ok ? 'Copied' : 'See console'; setTimeout(() => { btn.textContent = 'Copy'; }, 1600); };
+  if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => done(true), () => { console.log(text); done(false); });
+  else { console.log(text); done(false); }
+});
+buildCopyDrawer();
+ctEl.inert = true;
+const openParam = new URLSearchParams(location.search);
+if (openParam.has('tweaks')) requestAnimationFrame(() => setDrawer(true));
+if (openParam.has('content')) requestAnimationFrame(() => setCopyDrawer(true));
 
 /* ------------------------------------------------------------------
    Artwork: procedural parts of the illustration
@@ -1189,6 +1354,7 @@ function frame(now) {
 
 addEventListener('scroll', readScroll, { passive: true });
 addEventListener('resize', measure);
+renderCopy();
 applyTweaks();
 if (PINNED) cur = target;
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(measure);
