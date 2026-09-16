@@ -75,7 +75,8 @@
   }
   .stage .dim { position: absolute; inset: 0; background: rgb(var(--scrim)); opacity: 0; pointer-events: none; }
   /* WebGL pilot: the painted cover, animated in three.js, over the vector stage for Mind → Breath */
-  #gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; opacity: 0; pointer-events: none; }
+  #gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; opacity: 0; pointer-events: none; transition: opacity .4s ease; }
+  #art { transition: opacity .4s ease; }
   .grain {
     position: fixed; inset: 0; z-index: 3; pointer-events: none;
     opacity: .22; mix-blend-mode: soft-light;
@@ -917,7 +918,10 @@ function art(p, now) {
   const vs = seg(p, 2.45, 3.05);
   for (const v of vessels) setDraw(v.el, clamp((vs - v.delay) / 0.45, 0, 1));
 
-  // Listen — the finished cover arrives
+}
+
+// Listen — the finished cover arrives (runs whether the stage is vector or painted)
+function finale(p) {
   const c = cardShown = smooth(seg(p, 3.2, 3.9));
   coverCard.style.opacity = c.toFixed(3);
   coverCard.style.transform = `translate(var(--card-x, 0px), -50%) translateY(${((1 - c) * 50).toFixed(1)}px) rotate(${((1 - c) * -5).toFixed(2)}deg) scale(${(0.9 + 0.1 * c).toFixed(3)})`;
@@ -936,9 +940,12 @@ function frame(now) {
   vel += ((cur - prev) / dt - vel) * Math.min(1, 0.22 * dt);
   if (Math.abs(vel) < 0.00005) vel = 0;
 
-  camera(cur);
-  window.voxScroll = { p: cur, vel, on: state.webgl }; // read by the WebGL module
-  art(cur, now);
+  window.voxScroll = { p: cur, vel, on: state.webgl };  // read by the WebGL module
+  if (!(state.webgl && window.voxGL && window.voxGL.covering)) {
+    camera(cur);        // vector stage idles while the painting covers it
+    art(cur, now);
+  }
+  finale(cur);
 
   // Word drum
   const tilt = still ? 0 : clamp(vel * 330, -16, 16);
@@ -991,9 +998,10 @@ requestAnimationFrame(frame);
    masked regions in place (breathing lungs, beating heart, light down the airway);
    particles trace the ribbons and the air path. Without WebGL the vector stage shows.
 ------------------------------------------------------------------ */
-import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+import * as THREE from './webgl/three.module.min.js'; // vendored r170: the page works offline and cannot fall back because a CDN is slow
 
 const canvas = document.getElementById('gl');
+const svgArt = document.getElementById('art');
 const DEBUG = new URLSearchParams(location.search).get('debug') === 'masks';
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const ART = 2048;
@@ -1012,11 +1020,19 @@ const SHAPES = {
   ribbons: [[1150,470],[1560,470],[1610,700],[1570,1000],[1660,1300],[1570,1430],[1240,1430],[1140,1250],[1180,1000],[1090,700]],
   figure:  [[930,430],[985,250],[1100,140],[1300,95],[1480,110],[1600,200],[1665,320],[1705,420],[1795,520],[1818,570],[1792,605],[1802,650],[1788,700],[1795,760],[1742,795],[1705,880],[1690,1000],[1600,1110],[1520,1250],[1660,1420],[1860,1500],[1940,1700],[1970,2060],[820,2060],[760,1700],[900,1450],[1010,1350],[1150,1150],[1150,950],[1050,850],[960,700],[930,560]],
 };
-const POINTS = { hilumL: [1205, 1720], hilumR: [1590, 1668], heart: [1525, 1810], moon: [517, 241] };
+const POINTS = { hilumL: [1205, 1720], hilumR: [1590, 1668], heart: [1525, 1810], moon: [642, 278] }; // moon measured from the gold disc in the art (r 218)
 // Framings in artwork pixels: [centre x, centre y, span]; span is the width on wide screens, the height on tall ones
 const VIEWS = {
-  wide: { mind: [1100, 453, 1540], mid: [1330, 1010, 1270], breath: [1167, 1615, 1540] },
-  tall: { mind: [1380, 470, 1230], mid: [1440, 1050, 1000], breath: [1440, 1640, 900] }, // the art ends below the lungs, so zoom in rather than lift them
+  // keys: one framing per section (Voice, Mind, Breath, Heart, Listen)
+  // mids: a control point per leg that bends the camera path instead of cutting straight across
+  wide: {
+    keys: [[1024, 760, 2048], [1100, 453, 1540], [1167, 1615, 1540], [1500, 1767, 900], [1024, 1000, 2048]],
+    mids: [[1080, 560, 1760], [1330, 1010, 1270], [1330, 1700, 1150], [1320, 1500, 1500]],
+  },
+  tall: { // the art ends below the lungs, so the lower framings zoom in rather than lift them
+    keys: [[1150, 700, 1500], [1380, 470, 1230], [1440, 1640, 900], [1500, 1560, 1100], [1150, 1000, 1500]],
+    mids: [[1260, 560, 1350], [1440, 1050, 1000], [1470, 1660, 950], [1320, 1300, 1300]],
+  },
 };
 
 // Feathered region masks drawn at runtime: one colour channel per region
@@ -1060,6 +1076,7 @@ const ART_FRAG = /* glsl */`
   uniform sampler2D uArt, uMaskA, uMaskB;
   uniform vec2 uCenter, uView, uPar, uHilL, uHilR, uHeartC, uMoonC;
   uniform float uTime, uLife, uBreath, uBeat, uSweep, uSweepAmt, uMind, uDebug;
+  uniform float uVoice, uHeartAmt, uMoonSpin, uSheen;
   varying vec2 vUv;
   const float ART = 2048.0;
 
@@ -1080,10 +1097,13 @@ const ART_FRAG = /* glsl */`
 
     vec2 q = px;
     q += uPar * (1.0 - figure);                                   // depth: backdrop drifts against the figure
+    float moonIn = 1.0 - smoothstep(213.0, 219.0, distance(px, uMoonC)); // matches the painted disc, so its rim never tears
+    float ma = uMoonSpin * moonIn;                                // voice: the gold moon turns through its phase
+    q = mix(q, uMoonC + mat2(cos(ma), -sin(ma), sin(ma), cos(ma)) * (q - uMoonC), moonIn);
     float band = smoothstep(260.0, 330.0, px.y) * (1.0 - smoothstep(740.0, 800.0, px.y))
-               * (1.0 - smoothstep(1250.0, 1400.0, px.x)) * smoothstep(215.0, 260.0, distance(px, uMoonC));
+               * (1.0 - smoothstep(1250.0, 1400.0, px.x)) * smoothstep(224.0, 272.0, distance(px, uMoonC));
     float meter = 0.09 * sin(px.x * 0.045 + uTime * 2.6) * sin(px.x * 0.011 - uTime * 1.3);
-    q.y = mix(q.y, 545.0 + (q.y - 545.0) / (1.0 + meter), band * uLife);   // voice: the waveform rises and falls
+    q.y = mix(q.y, 545.0 + (q.y - 545.0) / (1.0 + meter * (0.3 + 0.7 * uVoice)), band * uLife); // voice: the waveform rises and falls
     vec2 hil = px.x < 1420.0 ? uHilL : uHilR;
     q = mix(q, hil + (q - hil) * (1.0 - 0.035 * uBreath), lungs);          // breath: lungs swell about their roots
     q = mix(q, uHeartC + (q - uHeartC) * (1.0 - 0.05 * uBeat), heart);     // beat
@@ -1109,9 +1129,11 @@ const ART_FRAG = /* glsl */`
     // mind: faint firing across the folds
     float fire = pow(max(0.0, sin(px.x * 0.031 + uTime * 1.7) * sin(px.y * 0.027 - uTime * 1.3)), 6.0);
     col += vec3(1.0, 0.72, 0.55) * brain * coral * (0.05 + 0.25 * fire) * uLife * uMind;
+    // heart: the muscle flushes on every beat
+    col += vec3(1.0, 0.42, 0.33) * heart * coral * (0.04 + 0.45 * uBeat) * uHeartAmt * uLife;
     // gold leaf catches a passing light
     float gd = (px.x + px.y * 0.55) / ART - (fract(uTime * 0.06) * 3.2 - 1.1);
-    col += vec3(1.0, 0.86, 0.6) * gold * exp(-gd * gd / 0.003) * 0.4 * uLife;
+    col += vec3(1.0, 0.86, 0.6) * gold * exp(-gd * gd / 0.003) * 0.4 * uSheen * uLife;
 
     vec2 sv = vUv - 0.5;
     col *= 1.0 - 0.56 * dot(sv, sv);
@@ -1121,9 +1143,9 @@ const ART_FRAG = /* glsl */`
 `;
 
 const DOT_VERT = /* glsl */`
-  attribute vec4 aSeed;                 // phase, lane (-1..1), kind (0 gold mote, 1 air), size
+  attribute vec4 aSeed;                 // phase, lane (-1..1), kind (0 ribbon mote, 1 air, 2 voice), size
   uniform vec2 uCenter, uView, uHilL, uHilR;
-  uniform float uTime, uPx, uAmtGold, uAmtAir, uBreath;
+  uniform float uTime, uPx, uAmtGold, uAmtAir, uAmtVoice, uBreath;
   varying float vAlpha, vKind;
   vec2 bez(vec2 a, vec2 b, vec2 c, vec2 d, float t) {
     float u = 1.0 - t;
@@ -1136,6 +1158,11 @@ const DOT_VERT = /* glsl */`
       pos = bez(vec2(1330.0, 520.0), vec2(1150.0, 820.0), vec2(1460.0, 1120.0), vec2(1260.0, 1460.0), t);
       pos.x += aSeed.y * 120.0 * sin(t * 3.1416) + sin(uTime * 0.9 + aSeed.x * 40.0) * 10.0;
       vAlpha = sin(t * 3.1416) * (0.55 + 0.45 * sin(uTime * 3.0 + aSeed.x * 90.0)) * uAmtGold;
+    } else if (aSeed.z > 1.5) {
+      float t = fract(aSeed.x + uTime * 0.07);
+      float x = mix(-120.0, 1400.0, t);
+      pos = vec2(x, 528.0 + 128.0 * sin(x * 0.0042 + 0.6) + aSeed.y * 46.0);
+      vAlpha = sin(t * 3.1416) * (0.5 + 0.5 * sin(uTime * 2.4 + aSeed.x * 70.0)) * uAmtVoice;
     } else {
       float t = fract(aSeed.x + uTime * 0.12);
       vec2 hil = aSeed.y < 0.0 ? uHilL : uHilR;
@@ -1150,7 +1177,7 @@ const DOT_VERT = /* glsl */`
     }
     vec2 s = (pos - uCenter) / uView;
     gl_Position = vec4(s.x * 2.0, -s.y * 2.0, 0.0, 1.0);
-    gl_PointSize = (aSeed.z < 0.5 ? 5.0 + aSeed.w * 6.0 : 3.0 + aSeed.w * 3.0) * uPx;
+    gl_PointSize = (aSeed.z > 1.5 ? 4.0 + aSeed.w * 4.0 : aSeed.z < 0.5 ? 5.0 + aSeed.w * 6.0 : 3.0 + aSeed.w * 3.0) * uPx;
     vKind = aSeed.z;
   }
 `;
@@ -1159,7 +1186,7 @@ const DOT_FRAG = /* glsl */`
   varying float vAlpha, vKind;
   void main() {
     float a = smoothstep(0.5, 0.0, length(gl_PointCoord - 0.5));
-    vec3 col = vKind < 0.5 ? vec3(1.0, 0.82, 0.52) : vec3(0.78, 0.96, 0.92);
+    vec3 col = vKind > 1.5 ? vec3(1.0, 0.88, 0.66) : vKind < 0.5 ? vec3(1.0, 0.82, 0.52) : vec3(0.78, 0.96, 0.92);
     gl_FragColor = vec4(col, a * a * vAlpha);
   }
 `;
@@ -1198,13 +1225,14 @@ async function main() {
       ]) },
       uPar: { value: new THREE.Vector2() }, uHeartC: { value: v2(POINTS.heart) }, uMoonC: { value: v2(POINTS.moon) },
       uLife: { value: 1 }, uBeat: { value: 0 }, uSweep: { value: 0 }, uSweepAmt: { value: 0 },
-      uMind: { value: 1 }, uDebug: { value: DEBUG ? 1 : 0 },
+      uMind: { value: 1 }, uVoice: { value: 1 }, uHeartAmt: { value: 0 }, uMoonSpin: { value: 0 },
+      uSheen: { value: 1 }, uDebug: { value: DEBUG ? 1 : 0 },
     },
   });
 
   const COUNT = 160, seeds = new Float32Array(COUNT * 4);
   for (let i = 0; i < COUNT; i++) {
-    seeds.set([Math.random(), Math.random() * 2 - 1, i < 90 ? 0 : 1, Math.random()], i * 4);
+    seeds.set([Math.random(), Math.random() * 2 - 1, i < 70 ? 0 : i < 120 ? 1 : 2, Math.random()], i * 4);
   }
   const dots = new THREE.BufferGeometry();
   dots.setAttribute('position', new THREE.BufferAttribute(new Float32Array(COUNT * 3), 3));
@@ -1212,7 +1240,7 @@ async function main() {
   const dotMaterial = new THREE.ShaderMaterial({
     vertexShader: DOT_VERT, fragmentShader: DOT_FRAG,
     transparent: true, depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending,
-    uniforms: { ...shared, uPx: { value: 1 }, uAmtGold: { value: 0 }, uAmtAir: { value: 0 } },
+    uniforms: { ...shared, uPx: { value: 1 }, uAmtGold: { value: 0 }, uAmtAir: { value: 0 }, uAmtVoice: { value: 0 } },
   });
 
   const scene = new THREE.Scene();
@@ -1233,8 +1261,9 @@ async function main() {
 
   function framing(p, t, still) {
     const tall = innerWidth < innerHeight * 0.9, V = tall ? VIEWS.tall : VIEWS.wide;
-    const k = smoother(seg(p, 1, 2)), A = V.mind, B = V.breath, M = V.mid;
-    // quadratic path that passes through the mid framing halfway
+    const leg = clamp(Math.floor(p), 0, V.keys.length - 2);
+    const k = smoother(clamp(p - leg, 0, 1)), A = V.keys[leg], B = V.keys[leg + 1], M = V.mids[leg];
+    // quadratic path that passes through this leg's mid framing halfway
     const at = i => { const c = 2 * M[i] - (A[i] + B[i]) / 2; return (1 - k) ** 2 * A[i] + 2 * (1 - k) * k * c + k * k * B[i]; };
     const aspect = innerHeight / innerWidth, span = at(2);
     let w = tall ? span / aspect : span, h = tall ? span : span * aspect;
@@ -1253,10 +1282,11 @@ async function main() {
     const still = reduceMotion.matches;
     if (!still) time += Math.min(0.1, (now - last) / 1000);
     last = now;
-    // short crossfades keep the vector and painted art from double-exposing for long
-    const vis = DEBUG ? 1 : s.on ? smooth(seg(s.p, 0.72, 0.93)) * (1 - smooth(seg(s.p, 2.07, 2.28))) : 0;
-    canvas.style.opacity = vis.toFixed(3);
-    if (vis <= 0.001) return; // nothing on screen: skip the GPU work
+    const want = DEBUG || s.on;
+    if (!want) {                                   // switched off: hand back to the vector stage
+      setHandoff(false);
+      return;
+    }
     resize();
 
     const p = s.p, f = framing(p, time, still), U = artMaterial.uniforms, D = dotMaterial.uniforms;
@@ -1265,26 +1295,45 @@ async function main() {
     shared.uTime.value = time;
     U.uPar.value.set(-(f.cx - f.rest[0]) * 0.035, -(f.cy - f.rest[1]) * 0.035);
     U.uLife.value = still ? 0 : 1;
-    U.uMind.value = 1 - smooth(seg(p, 1.05, 1.6));
+    const near = (at, hold, fade) => 1 - smooth(seg(Math.abs(p - at), hold, fade)); // 1 on that section, easing off either side
+    U.uMind.value = near(1, 0.15, 0.9);
+    U.uVoice.value = near(0, 0.2, 1.3);
+    const heartAmt = near(3, 0.25, 1.2);
+    U.uHeartAmt.value = heartAmt;
+    U.uMoonSpin.value = -p * 0.22 + time * 0.015;
+    U.uSheen.value = 0.45 + 0.55 * near(4, 0.3, 1.4);
 
     const phase = (time / 4.5) % 1;                        // one breath every 4.5 s
     shared.uBreath.value = 0.5 - 0.5 * Math.cos(phase * Math.PI * 2);
     const bt = (time * 1.05) % 1;
-    U.uBeat.value = Math.exp(-(((bt - 0.08) / 0.035) ** 2)) + 0.55 * Math.exp(-(((bt - 0.26) / 0.04) ** 2));
+    const beat = Math.exp(-(((bt - 0.08) / 0.035) ** 2)) + 0.55 * Math.exp(-(((bt - 0.26) / 0.04) ** 2));
+    U.uBeat.value = beat * (0.45 + 0.55 * heartAmt);   // the heart works harder once it is the subject
 
     // light down the airway: once as the camera travels, then on every inhale while resting on Breath
     const trans = seg(p, 1.12, 1.95), travelAmt = Math.sin(Math.PI * trans);
-    const inhaleAmt = (phase < 0.5 ? Math.sin(Math.PI * phase / 0.5) : 0) * smooth(seg(p, 1.9, 2.05)) * 0.8;
+    const inhaleAmt = (phase < 0.5 ? Math.sin(Math.PI * phase / 0.5) : 0) * smooth(seg(p, 1.9, 2.05)) * (1 - smooth(seg(p, 2.6, 3.2))) * 0.8;
     const travelling = travelAmt >= inhaleAmt;
     U.uSweep.value = travelling ? 760 + 820 * smooth(trans) : 760 + 820 * Math.min(1, phase / 0.5);
     U.uSweepAmt.value = still ? 0 : Math.max(travelAmt, inhaleAmt);
 
     points.visible = !still;
     D.uPx.value = renderer.domElement.width / f.w;
-    D.uAmtGold.value = 0.35 + 0.65 * Math.sin(Math.PI * seg(p, 0.9, 2.1));
-    D.uAmtAir.value = smooth(seg(p, 1.3, 1.9));
+    D.uAmtGold.value = 0.3 + 0.7 * near(1.6, 0.4, 1.4);
+    D.uAmtAir.value = smooth(seg(p, 1.3, 1.9)) * (1 - smooth(seg(p, 2.7, 3.3)));
+    D.uAmtVoice.value = near(0.35, 0.35, 1.0);
 
     renderer.render(scene, camera);
+    setHandoff(true);                              // first painted frame is on screen: cross over
+  }
+
+  let handedOver = null;
+  function setHandoff(on) {
+    if (on === handedOver) return;
+    handedOver = on;
+    canvas.style.opacity = on ? '1' : '0';
+    svgArt.style.opacity = on ? '0' : '1';
+    window.voxGL = { covering: on };               // the vector stage idles while the painting covers it
+    document.documentElement.dataset.gl = on ? 'painting' : 'vector';
   }
   requestAnimationFrame(frame);
 }
@@ -1292,6 +1341,9 @@ async function main() {
 main().catch(err => {
   console.warn('WebGL pilot unavailable, keeping the vector stage:', err);
   canvas.style.display = 'none';
+  svgArt.style.opacity = '1';
+  window.voxGL = { covering: false, failed: true };
+  document.documentElement.dataset.gl = 'failed';
 });
 </script>
 </body>
