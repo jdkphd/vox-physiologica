@@ -258,12 +258,13 @@
   .tw-open {
     position: fixed; right: calc(var(--frame) + var(--gutter)); bottom: calc(var(--frame) + var(--gutter)); z-index: 20;
     height: 34px; padding: 0 15px 0 12px; border-radius: 999px; cursor: pointer;
-    display: flex; align-items: center; gap: 8px;
+    display: none; align-items: center; gap: 8px;   /* editing tools: shown only in edit mode */
     border: 1px solid rgba(251,241,220,.18); background: rgba(6,23,42,.72); color: rgba(251,241,220,.8);
     -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
     font: 600 10px/1 var(--sans); letter-spacing: .16em; text-transform: uppercase;
     transition: opacity .3s ease, color .2s, border-color .2s;
   }
+  body.edit-on .tw-open { display: flex; }
   .tw-open:hover, .tw-open:focus-visible { color: #fbf1dc; border-color: rgba(251,241,220,.4); outline: none; }
   body.tw-on .tw-open { opacity: 0; pointer-events: none; }
 
@@ -1006,9 +1007,15 @@ $('#ctCopy').addEventListener('click', e => {
 });
 buildCopyDrawer();
 ctEl.inert = true;
+
+/* editing tools are for whoever runs the site, not for visitors */
+const EDIT_MODE = ['localhost', '127.0.0.1', '::1', ''].includes(location.hostname)
+  || location.protocol === 'file:'
+  || new URLSearchParams(location.search).has('edit');
+document.body.classList.toggle('edit-on', EDIT_MODE);
 const openParam = new URLSearchParams(location.search);
-if (openParam.has('tweaks')) requestAnimationFrame(() => setDrawer(true));
-if (openParam.has('content')) requestAnimationFrame(() => setCopyDrawer(true));
+if (EDIT_MODE && openParam.has('tweaks')) requestAnimationFrame(() => setDrawer(true));
+if (EDIT_MODE && openParam.has('content')) requestAnimationFrame(() => setCopyDrawer(true));
 
 /* ------------------------------------------------------------------
    Artwork: procedural parts of the illustration
