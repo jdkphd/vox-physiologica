@@ -595,8 +595,8 @@
 const play = '<svg viewBox="0 0 10 11" fill="currentColor" aria-hidden="true"><path d="M0 0l10 5.5L0 11z"/></svg>';
 const SECTIONS = [
   { word: 'Voice', hero: true,
-    eyebrow: 'A podcast about the living body',
-    text: 'Conversations on how the body works — the mind, the breath, the beat — told one system at a time.',
+    eyebrow: 'A podcast about physiology and being human',
+    text: 'We may have heard about their research. What about their stories?',
     actions: [['Play latest episode', '#s-2', true, play], ['All episodes', '#s-2']] },
   { word: 'Mind', eyebrow: 'Episode 01 · Neurophysiology',
     title: 'The brain that listens back.',
@@ -778,10 +778,10 @@ const TWEAKS = [
     { k: 'wordAlign', t: 'pick', d: 'left', label: 'Word column', opts: [['left', 'Left'], ['centre', 'Centre']] },
     { k: 'wordY', t: 'range', d: 35, min: 18, max: 62, step: 1, unit: '%', label: 'Word height' },
     { k: 'gutter', t: 'range', d: 0, min: -20, max: 40, step: 4, unit: 'px', label: 'Margins', hint: 'Added to the responsive default' },
-    { k: 'portraitZoom', t: 'range', d: 100, min: 70, max: 150, step: 5, unit: '%', label: 'Portrait zoom out', hint: 'Phones and upright tablets only' },
+    { k: 'portraitZoom', t: 'range', d: 150, min: 70, max: 150, step: 5, unit: '%', label: 'Portrait zoom out', hint: 'Phones and upright tablets only' },
   ]],
   ['Motion', [
-    { k: 'wordMotion', t: 'pick', d: 'tilt', label: 'Word motion', opts: [['tilt', 'Tilt with scroll'], ['straight', 'Stay straight'], ['soft', 'Soft lift']] },
+    { k: 'wordMotion', t: 'pick', d: 'soft', label: 'Word motion', opts: [['tilt', 'Tilt with scroll'], ['straight', 'Stay straight'], ['soft', 'Soft lift']] },
     { k: 'tiltAmount', t: 'range', d: 16, min: 2, max: 30, step: 1, unit: 'deg', label: 'Tilt amount' },
     { k: 'scrollEase', t: 'range', d: 10, min: 4, max: 30, step: 1, label: 'Scroll easing', hint: 'Low is floaty, high is snappy' },
     { k: 'parallax', t: 'range', d: 12, min: 0, max: 40, step: 2, unit: '/1000', label: 'Depth drift' },
